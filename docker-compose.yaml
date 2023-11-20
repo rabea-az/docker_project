@@ -1,0 +1,39 @@
+version: '3'
+
+services:
+  mongodb:
+    image: mongo:4.4
+    container_name: mongodb-container
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: rabea
+      MONGO_INITDB_ROOT_PASSWORD: rabea
+      MONGO_INITDB_DATABASE: rabea_db
+
+  yolo:
+    image: ultralytics/yolov5:latest-cpu
+    depends_on:
+      - mongodb
+    working_dir: "/usr/src/app"
+    container_name: yolo-container
+    restart: always
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./yolo5:/use/src/app
+    command:
+      - /bin/sh
+      - -c
+      - |
+        sh -c pip install --upgrade pip
+        pip install -r requirements.txt
+        curl -L https://github.com/ultralytics/yolov5/releases/download/v6.1/yolov5s.pt -o yolov5s.pt
+        python3 app.py
+
+  #another_service:
+    #image: your_another_service_image
+    #container_name: another-service-container
+    #####restart: always
+    # Add additional configuration for your service here
