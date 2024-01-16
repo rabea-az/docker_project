@@ -5,6 +5,7 @@ import time
 from telebot.types import InputFile
 import boto3
 import uuid
+import requests
 
 class Bot:
 
@@ -60,9 +61,15 @@ class Bot:
             InputFile(img_path)
         )
 
+    # def handle_message(self, msg):
+    #     """Bot Main message handler"""
+    #     logger.info(f'Incoming message: {msg}')
+    #     self.send_text(msg['chat']['id'], f'Your original message: {msg["text"]}')
+    
     def handle_message(self, msg):
         """Bot Main message handler"""
         logger.info(f'Incoming message: {msg}')
+
         self.send_text(msg['chat']['id'], f'Your original message: {msg["text"]}')
 
 
@@ -73,20 +80,59 @@ class QuoteBot(Bot):
         if msg["text"] != 'Please don\'t quote me':
             self.send_text_with_quote(msg['chat']['id'], msg["text"], quoted_msg_id=msg["message_id"])
 
-
 class ObjectDetectionBot(Bot):
+    aws_key_id = os.getenv('AWS_KEY_ID')
+    aws_access_key = os.getenv('AWS_ACCESS_KEY')
+    region = os.getenv('REGION')
+
+    def formatted_message(self,json_ob):
+        obj_count = {}
+        formatted_string = f"Detected Objects:\n"
+        for label in json_ob["labels"]:
+            class_name = label["class"]
+            if class_name in obj_count:
+                obj_count[class_name] += 1
+            else:
+                obj_count[class_name] = 1
+        for key, value in obj_count.items():
+            formatted_string += f"{key}: {value}\n"
+        return formatted_string
+
+    def get_prediction(self, img_url):
+        try:
+            response = requests.post(f"http://yolo-container:8081/predict?imgName={img_url}")
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Prediction request failed: {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error: {e}")
+            return None
+    
     def handle_message(self, msg):
         logger.info(f'Incoming message: {msg}')
 
         if self.is_current_msg_photo(msg):
-            pass
             # TODO download the user photo (utilize download_user_photo)
-            Bot.download_user_photo(msg)
+            photo_path = self.download_user_photo(msg)
             # TODO upload the photo to S3
-            s3_client = boto3.client("s3")
-            img_name =
-            prediction_id = str(uuid.uuid4())
-            s3_client.upload_file(f"./photos/{img_name}", "rabea-bucket", f"{prediction_id}-{img_name}")
+            s3_bucket = os.getenv('BUCKET_NAME')
+            s3_path = os.path.basename(photo_path)
+            s3_client = boto3.client('s3')
+            s3_client.upload_file(photo_path, s3_bucket, s3_path)
+
             # TODO send a request to the `yolo5` service for prediction
+            prediction = self.get_prediction(s3_path)
 
             # TODO send results to the Telegram end-user
+            if prediction:
+                # send the prediction summary
+                formatted_response = self.formatted_message(prediction)
+                self.send_text(msg['chat']['id'], text=formatted_response)
+            else:
+                self.send_text(msg['chat']['id'], "Failed to get prediction from YOLO service.")
+        elif "text" in msg:
+            self.send_text(msg['chat']['id'], f'Your original message: {msg["text"]}')
+        else:
+            self.send_text(msg['chat']['id'], 'Unsupported message type.')
